@@ -103,7 +103,6 @@ def v_pq(p, q, H):
         ])
     return v
 
-
 def detectchessboard(num_corner_x, num_corner_y, dir_chess, dir_result):
     
     if not os.path.exists(dir_result):
@@ -114,13 +113,11 @@ def detectchessboard(num_corner_x, num_corner_y, dir_chess, dir_result):
 
     # initialize the world coordinates for chessboard
     objp = np.zeros((num_corner_x*num_corner_y,3), np.float32)
-    objp[:,:2] = np.mgrid[0:num_corner_x, 0:num_corner_y].T.reshape(-1,2)
+    objp[:,:2] = np.mgrid[0:num_corner_x, 0:num_corner_y].T.reshape(-1,2)  #  (num_corner_x * num_corner_y , 3)
 
     # Arrays to store object points and image points from all the images.
     objpoints = [] # 3d points in real world space
     imgpoints = [] # 2d points in image plane.
-
-    # print(objp.shape)    #  (num_corner_x * num_corner_y,3)
 
     images = glob.glob(f'{dir_chess}/*.jpg')
 
@@ -138,8 +135,14 @@ def detectchessboard(num_corner_x, num_corner_y, dir_chess, dir_result):
             # print(corners.shape)     # (num_corner_x * num_corner_y, 1, 2)
 
             for i, corner in enumerate(corners):
-                center = tuple(map(int, corner[0]))  # Convert corner to (x, y) integer tuple
-                cv2.circle(img, center, radius=16, color=(0, 0, 255), thickness=-1)  # Draw a circle
+                center = tuple(map(int, corner[0]))  
+                cv2.circle(img, center, radius=16, color=(0, 0, 255), thickness=-1)  
+                
+                # TODO: Update the text size appropriately for the input image resolution.
+                # Currently, when displaying the 3D and 2D coordinates of each corner point as text, 
+                # the text size varies depending on the image resolution. 
+                # It is necessary to write code to dynamically adjust the text size to ensure 
+                # it is visually appropriate for the image size
                 
                 # Add objpoint (3D coordinate) above the corner
                 obj_text = f"{int(objp[i, 0])}, {int(objp[i, 1])}, {int(objp[i, 2])}"
@@ -153,19 +156,10 @@ def detectchessboard(num_corner_x, num_corner_y, dir_chess, dir_result):
         # cv2.drawChessboardCorners(img, (num_corner_x, num_corner_y), corners, ret)
         cv2.imwrite(output_path, img)  
 
-    # print(objpoints.shape)
-    # print("\n")
-    # print(imgpoints.shape)
-    
     return objpoints, imgpoints
 
+def detectarucoboard(dir_aruco, aruco_dict, dir_result, markerLength, markerSeparation, s_vertical, s_horizontal):
 
-
-
-def detectarucoboard(dir_aruco, dir_result, markerLength, markerSeparation, s_vertical, s_horizontal):
-
-    aruco_dict = aruco.getPredefinedDictionary( aruco.DICT_6X6_1000 )
-    
     board = aruco.GridBoard_create(s_vertical, s_horizontal, markerLength, markerSeparation, aruco_dict)
 
     arucoParams = aruco.DetectorParameters_create()
@@ -180,7 +174,6 @@ def detectarucoboard(dir_aruco, dir_result, markerLength, markerSeparation, s_ve
     objpoints = []  # 3D points in real world space
     imgpoints = []  # 2D points in image plane
 
-    # Load images
     images = glob.glob(f'{dir_aruco}/*.JPG')
 
     for idx, fname in enumerate(images):
@@ -197,8 +190,7 @@ def detectarucoboard(dir_aruco, dir_result, markerLength, markerSeparation, s_ve
                 # `board.objPoints` provides the object points for each marker
                 objp.append(board.objPoints[id_[0]])  # Append 4 corner points for each marker
             
-
-            objp = np.vstack(objp).reshape(-1, 3)  # Ensure shape is (n, 3)
+            objp = np.vstack(objp).reshape(-1, 3)  
             objpoints.append(objp)
 
             # Extract image points for the detected corners
@@ -211,10 +203,14 @@ def detectarucoboard(dir_aruco, dir_result, markerLength, markerSeparation, s_ve
                 # 3D object point
                 point3D = objp[i]
 
-                # Draw a red circle at the 2D point
                 cv2.circle(img, point2D, radius=5, color=(0, 0, 255), thickness=-1)
 
-                # Add 3D and 2D coordinates as text
+                # TODO: Update the text size appropriately for the input image resolution.
+                # Currently, when displaying the 3D and 2D coordinates of each corner point as text, 
+                # the text size varies depending on the image resolution. 
+                # It is necessary to write code to dynamically adjust the text size to ensure 
+                # it is visually appropriate for the image size
+
                 cv2.putText(
                     img,
                     f"({point3D[0]:.2f}, {point3D[1]:.2f}, {point3D[2]:.2f})",
@@ -235,23 +231,14 @@ def detectarucoboard(dir_aruco, dir_result, markerLength, markerSeparation, s_ve
                     1,
                     cv2.LINE_AA,
                 )
-
-
-
-
-            #     # Visualize detected corners
-            # img = cv2.aruco.drawDetectedMarkers(img, corners, ids)
-
-
-                # Save visualized image
+                
             output_path = f"{dir_result}/arucoboard_corner/corner_aruco_{idx}.jpg"
             cv2.imwrite(output_path, img)
 
     return objpoints, imgpoints
 
-def detectcharucoboard(dir_charuco, dir_result, squareLegth, markerLength, s_vertical, s_horizontal):
+def detectcharucoboard(dir_charuco, aruco_dict, dir_result, squareLegth, markerLength, s_vertical, s_horizontal):
 
-    aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
     board = aruco.CharucoBoard_create(s_vertical, s_horizontal, squareLegth, markerLength, aruco_dict)
 
     arucoParams = aruco.DetectorParameters_create()
@@ -266,7 +253,6 @@ def detectcharucoboard(dir_charuco, dir_result, squareLegth, markerLength, s_ver
     objpoints = []  # 3D points in real world space
     imgpoints = []  # 2D points in image plane
 
-    # Load images
     images = glob.glob(f'{dir_charuco}/*.JPG')
 
     for idx, fname in enumerate(images):
@@ -280,6 +266,9 @@ def detectcharucoboard(dir_charuco, dir_result, squareLegth, markerLength, s_ver
             # Interpolate Charuco corners
             ret, charuco_corners, charuco_ids = aruco.interpolateCornersCharuco(corners, ids, gray, board)
 
+            # TODO: Modify the code to handle cases where the entire Charuco board is not visible
+            # Currently, if the entire Charuco board is not visible in an image, the 2D-3D point pairs do not match, 
+            # so such images are excluded. It is necessary to modify the code to include these images as well.
             if ret > 0 and charuco_corners.shape[0] == board.chessboardCorners.shape[0]:
                 # Append object points and image points
                 objpoints.append(board.chessboardCorners)
@@ -287,15 +276,16 @@ def detectcharucoboard(dir_charuco, dir_result, squareLegth, markerLength, s_ver
 
                 # Draw Charuco board corners on the image
                 for i in range(len(charuco_corners)):
-                    # 2D image point
                     point2D = tuple(charuco_corners[i][0].astype(int))
-                    # 3D object point
                     point3D = board.chessboardCorners[charuco_ids[i][0]]
 
-                    # Draw a red circle at the 2D point
                     cv2.circle(img, point2D, radius=5, color=(0, 0, 255), thickness=-1)
 
-                    # Add 3D and 2D coordinates as text
+                    # TODO: Update the text size appropriately for the input image resolution.
+                    # Currently, when displaying the 3D and 2D coordinates of each corner point as text, 
+                    # the text size varies depending on the image resolution. 
+                    # It is necessary to write code to dynamically adjust the text size to ensure 
+                    # it is visually appropriate for the image size
                     cv2.putText(
                         img,
                         f"({point3D[0]:.2f}, {point3D[1]:.2f}, {point3D[2]:.2f})",
@@ -317,12 +307,10 @@ def detectcharucoboard(dir_charuco, dir_result, squareLegth, markerLength, s_ver
                         cv2.LINE_AA,
                     )
 
-        # Save the output image with annotations
         output_path = f"{dir_board_corner}/charucoboard_{idx}.jpg"
         cv2.imwrite(output_path, img)
 
     return objpoints, imgpoints
-
 
 def compute_jacobian(K, R, t, objpoints):
     num_points = objpoints.shape[0]
@@ -452,6 +440,7 @@ def nonlinear_optimization(K_init, extrinsics_init, objpoints, imgpoints, max_it
 
 if __name__ == "__main__":
     
+    # Initialize settings
     parser = argparse.ArgumentParser(description='calibration arguments')
     parser.add_argument('--mode', default="single", help='choose camera type: single or stereo')
     parser.add_argument('--board_type', default="charucoboard", help='select board type: chessboard, arucoboard, charucoboard') 
@@ -468,6 +457,7 @@ if __name__ == "__main__":
     parser.add_argument('--marker_sep_len', default=0.5, help='marker seperation length in cm') 
     parser.add_argument('--squares_vertical', default=4, help='number of squares in vertical') 
     parser.add_argument('--squares_horizontal', default=5, help='number of squares in horizontal') 
+    aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_6X6_1000)
 
     # charucoboard settings
     parser.add_argument('--charuco_data_dir', default='./data/charuco_data', help='direction for charucoboard data') 
@@ -475,31 +465,36 @@ if __name__ == "__main__":
     parser.add_argument('--charuco_square_len', default=4, help='marker seperation length in cm') 
     parser.add_argument('--charuco_squares_vertical', default=5, help='number of squares in vertical') 
     parser.add_argument('--charuco_squares_horizontal', default=7, help='number of squares in horizontal') 
+    charuco_dict = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
 
     args = parser.parse_args()
 
-    # print(args)
+    """
+        1. Feature point detection (corner detection)
+            - Get the 2D-3D corner point correspondences matches
+            - Compatible with any board type: chessboard, arucoboard, charucoboard
 
-    # 1. Feature point detection (corner detection)
-
+        Args: 
+            - Board setting parameters
+            - Image data directory
+            
+        Returns: 
+            - 2D points (list of shape: (N_images))
+                - Each element in the list is a numpy array of shape: (num_points, 1, 2)
+            - 3D points (list of shape: (N_images))
+                - Each element in the list is a numpy array of shape: (num_points, 3)
+    """
     if args.board_type == "chessboard":
         objpoints, imgpoints = detectchessboard(args.corners_x, args.corners_y, args.chess_data_dir, args.result_dir)
     elif args.board_type == "arucoboard":
-        objpoints, imgpoints = detectarucoboard(args.aruco_data_dir, args.result_dir, args.marker_len, 
+        objpoints, imgpoints = detectarucoboard(args.aruco_data_dir, aruco_dict, args.result_dir, args.marker_len, 
                                                 args.marker_sep_len, args.squares_vertical, args.squares_horizontal)
     elif args.board_type == "charucoboard":
-        objpoints, imgpoints = detectcharucoboard(args.charuco_data_dir, args.result_dir, args.charuco_square_len, 
+        objpoints, imgpoints = detectcharucoboard(args.charuco_data_dir, charuco_dict, args.result_dir, args.charuco_square_len, 
                                                 args.charuco_marker_len, args.charuco_squares_vertical, args.charuco_squares_horizontal)
     else:
         print("You set the wrong board type!")
 
-
-    # print((len(objpoints))) #  (49, 3)
-    # print((len(imgpoints))) #  (49, 3)
-
-    # print(((objpoints[22].shape))) #  (49, 3)
-    # print("\n")
-    # print((imgpoints[22].shape)) # (49, 1,2)
 
     # 2. Homography estimation (world-image relationship)
 
@@ -524,9 +519,13 @@ if __name__ == "__main__":
 
     # 4. Non-linear optimization
 
+    #TODO: need to implement (currnet GPT based code is not working well)
     # refined_intrinsic, refined_extrinsic = nonlinear_optimization(intrinsic, extrinsic, objpoints, imgpoints, max_iter=10, tol=1e-6)
 
 
+
+# TODO: arrange this below visualization code into a single function
+# TODO: modify visualized camera rectangles appropriate to input image resolution and camera size
 # show the camera extrinsics
 print('Show the camera extrinsics')
 # print(extrinsic)
@@ -570,13 +569,4 @@ ax.set_ylabel('z')
 ax.set_zlabel('-y')
 ax.set_title('Extrinsic Parameters Visualization')
 plt.show()
-
-
-    
-    
-    
-    
-
-
-
 
