@@ -313,7 +313,7 @@ def detectcharucoboard(dir_charuco, aruco_dict, dir_result, squareLegth, markerL
 
     return objpoints, imgpoints
 
-def compute_jacobian(K, R, t, projected_points_j, imgpoints_i_j,reprojected_points, image_total_error, distortion_coeff):
+def compute_jacobian(K, distortion_coeff, R, t, projected_points_j, imgpoints_i_j,reprojected_points, image_total_error):
     u0 = K[0,2]
     v0 = K[1,2]
     
@@ -338,13 +338,84 @@ def compute_jacobian(K, R, t, projected_points_j, imgpoints_i_j,reprojected_poin
     u_dash = u + (u - u0) * (k1 * r**2 + k2 * r**4)
     v_dash = v + (v - v0) * (k1 * r**2 + k2 * r**4)
 
-    reprojected_points.append([u_dash, v_dash])
-    imgpoints_i_j_dash = np.array([u_dash, v_dash, 1], dtype='float').reshape(3,1)
+    reprojected_points.append([float(u_dash), float(v_dash)])
+    imgpoints_i_j_dash = np.array([float(u_dash), float(v_dash), 1], dtype='float').reshape(3,1)
 
     e = np.linalg.norm((imgpoints_i_j - imgpoints_i_j_dash), ord=2)
     image_total_error = image_total_error + e
 
     return reprojected_points, image_total_error
+
+
+def lossFunc(x0, extrinsic, imgpoints):
+    
+    error_mat = []
+    loss_error_total = []
+
+
+    intrinsic = np.array([0,0,0,0,0,0,0,0,0]).reshape(3,3)
+    intrinsic[0,0], intrinsic[0,1], intrinsic[1,1], intrinsic[0,2], intrinsic[1,2], distortion_coeff[0], distortion_coeff[1] = x0
+
+    u0 = intrinsic[0,2]
+    v0 = intrinsic[1,2]
+    
+    k1 = distortion_coeff[0]
+    k2 = distortion_coeff[1]
+
+
+
+    for i in range(len(extrinsic)):
+        R = extrinsic[i][:, :3]
+        t = extrinsic[i][:, 3]
+
+        image_total_error = 0.0
+        error = []
+
+        #n번째 사진을 고르는 것.(-> 49개 점 중 몇번째 점을 고를지 정해야함)
+        objpoints_i = objpoints[i]   # X, X, 0
+        imgpoints_i = np.squeeze(imgpoints[i], axis=1)   # X, X
+
+        # print(intrinsic.shape)
+        # print(R.shape)
+        # print(t.shape)
+        # print(objpoints.shape)
+        # objpoints_i = np.array(objpoints_i)
+        projected_points = project_points(intrinsic, R, t, objpoints_i)
+
+
+        for j in range(len(projected_points)):  # j번째 점마다 error 구하기
+            imgpoints_i_j = imgpoints_i[j]
+            projected_points_j = projected_points[j]
+            
+            #jacobian
+            x = projected_points_j[0] / projected_points_j[2]
+            y = projected_points_j[1] / projected_points_j[2]
+            r = np.sqrt(x**2 + y**2) #radius of distortion
+
+            #observed image coordinates
+            # print(np.array(imgpoints_i)[0], np.array(imgpoints_i)[1])
+            imgpoints_i_j = np.array([imgpoints_i_j[0], imgpoints_i_j[1], 1], dtype='float').reshape(3,1)  
+
+            #projected image coordinates
+            Rt = np.column_stack((R,t))
+            projected_points_j_homo = np.array([projected_points_j[0], projected_points_j[1], 1]).reshape(3,1)
+    
+            uvw = np.dot( (np.dot(intrinsic, Rt)).T, projected_points_j_homo )
+
+            u = uvw[0] / uvw[2]
+            v = uvw[1] / uvw[2]
+            u_dash = u + (u - u0) * (k1 * r**2 + k2 * r**4)
+            v_dash = v + (v - v0) * (k1 * r**2 + k2 * r**4)
+
+
+            imgpoints_i_j_dash = np.array([float(u_dash), float(v_dash), 1], dtype='float').reshape(3,1)
+            print(imgpoints_i_j_dash)
+
+            e = np.linalg.norm((imgpoints_i_j - imgpoints_i_j_dash), ord=2)
+            image_total_error = image_total_error + e
+        error.append(image_total_error/49)
+
+    return np.array(error)
 
 def project_points(K, R, t, objpoints):
     """
@@ -363,6 +434,7 @@ def project_points(K, R, t, objpoints):
     extrinsic = np.hstack((R, t.reshape(-1, 1)))  # [R | t]
     
     # Project points
+    objpoints = np.array(objpoints)
     projected = K @ extrinsic @ np.hstack((objpoints, np.ones((objpoints.shape[0], 1)))).T
     projected /= projected[2, :]  # Normalize by z-coordinate
     
@@ -370,9 +442,10 @@ def project_points(K, R, t, objpoints):
     return projected.T  # Return x, y coordinates
 
 
-def compute_reprojection_error(K, extrinsics, objpoints, imgpoints, distortion_coeff, lr=1e-4):
+def compute_reprojection_error(K, extrinsics, objpoints, imgpoints, distortion_coeff, x0):
     error_mat = []
     all_reprojected_points = []
+    loss_error_total = []
 
     for i in range(len(extrinsics)):
         R = extrinsics[i][:, :3]
@@ -396,39 +469,33 @@ def compute_reprojection_error(K, extrinsics, objpoints, imgpoints, distortion_c
         for j in range(len(projected_points)):  # j번째 점마다 error 구하기
             imgpoints_i_j = imgpoints_i[j]
             projected_points_j = projected_points[j]
-            all_reprojected_points, image_total_error = compute_jacobian(K, R, t, projected_points_j, imgpoints_i_j, reprojected_points, image_total_error, distortion_coeff)
+            all_reprojected_points, image_total_error = compute_jacobian(K, distortion_coeff, R, t, projected_points_j, imgpoints_i_j, reprojected_points, image_total_error)
             
         all_reprojected_points.append(all_reprojected_points)
         error_mat.append(image_total_error)
 
+        
     error_mat = np.array(error_mat)
     error_average = np.sum(error_mat) /(len(projected_points_j)*projected_points_j.shape[0])
-    print(error_average)
-    return error_average, all_reprojected_points
-
-def nonlinear_optimization(K_init, extrinsics_init, objpoints, imgpoints, homographies, distortion_coeff, max_iter=10, tol=1e-6): # distortion coeff, intrinsic ..
-    K = K_init.copy()
-    extrinsics = extrinsics_init.copy()
-    prev_error = float('inf')
+    # print(error_average)
 
 
-    for iteration in range(max_iter):
-        print(f"Iteration {iteration + 1}")
 
-        prev_error, _ = compute_reprojection_error(K_init, extrinsics_init, objpoints, imgpoints, distortion_coeff)
-        extrinsics = solve_extrinsic(K, homographies)
-        current_error, points = compute_reprojection_error(K, extrinsics, objpoints, imgpoints, distortion_coeff)
-        # print(error_mat)
 
-        print(f"Reprojection Error: {current_error}")
+    return error_average, all_reprojected_points, loss_error_total, x1
 
-        if abs(prev_error - current_error) < tol:
-            print("Convergence reached.")
-            refined_intrinsic = K
-            refined_extrinsic = extrinsics
-            break
+def nonlinear_optimization(K_init, K, extrinsics_init, objpoints, imgpoints, homographies, distortion_coeff_init, distortion_coeff): # distortion coeff, intrinsic ..
 
-    return refined_intrinsic, refined_extrinsic
+
+    prev_error, _, _, _ = compute_reprojection_error(K_init, extrinsics_init, objpoints, imgpoints, distortion_coeff_init, x0)
+    extrinsics = solve_extrinsic(K, homographies)
+    current_error, points, _, _ = compute_reprojection_error(K, extrinsics, objpoints, imgpoints, distortion_coeff, x0)
+
+    print("prev_error     :", prev_error)
+    print("current_error  :", current_error)
+
+
+    return refined_extrinsic, refined_intrinsic, x0, x1
 
 
 
@@ -492,31 +559,45 @@ if __name__ == "__main__":
 
     # 2. Homography estimation (world-image relationship)
 
-    homographies = []
-    
+    homographies_init = []
+
     for i in range(len(imgpoints)): # Find out the homography matrix of each iamge
-        homographies.append(solve_homography(objpoints[i], imgpoints[i]))
-        
+        homographies_init.append(solve_homography(objpoints[i], imgpoints[i]))
     # print(len(homographies))              #  number of board data
     # print((homographies[0]).shape)        #  (3,3)
 
 
     # 3. Closed form solution (Intrinsic, Extrinsic and Distortion coeffs)
     
-    intrinsic, B = solve_intrinsic(homographies)
-    extrinsic = solve_extrinsic(intrinsic, homographies)
-    
+    intrinsic_init, B_init = solve_intrinsic(homographies_init)
+    extrinsic_init = solve_extrinsic(intrinsic_init, homographies_init)
     # print("intrinsic", intrinsic)     # (3, 3)
     # print("extrinsic", extrinsic)     # (3, 4)
+    distortion_coeff_init = np.array([0,0]).reshape(2,1)
+    distortion_coeff = distortion_coeff_init.copy()
 
-
+   
     # 4. Non-linear optimization
-    x0 = np.array([intrinsic[0,0], intrinsic[0,1], intrinsic[1,1], intrinsic[0,2], intrinsic[1,2], 0, 0])
-    res = scipy.optimize.least_squares(fun=lossFunc, x0=x0, method="lm", args=[extrinsic, imgpoints, objpoints])
+    x0 = np.array([float(intrinsic_init[0,0]), float(intrinsic_init[0,1]), float(intrinsic_init[1,1]), float(intrinsic_init[0,2]), float(intrinsic_init[1,2]), float(distortion_coeff_init[0]), float(distortion_coeff_init[1])])
+
+
+
+    res = scipy.optimize.least_squares(fun=lossFunc, x0=x0, method="lm", args=[extrinsic_init, imgpoints])
     x1 = res.x
 
-    refined_intrinsic, refined_extrinsic = nonlinear_optimization(intrinsic, extrinsic, objpoints, imgpoints, homographies, distortion_coeff, max_iter=10, tol=1e-6)
+    intrinsic = np.array([0,0,0,0,0,0,0,0,0]).reshape(3,3)
+    intrinsic[0,0], intrinsic[0,1], intrinsic[1,1], intrinsic[0,2], intrinsic[1,2], distortion_coeff[0], distortion_coeff[1] = x1
 
+
+    refined_extrinsic, refined_intrinsic, x0, x1 = nonlinear_optimization(intrinsic_init, intrinsic, extrinsic_init, objpoints, imgpoints, homographies_init, distortion_coeff_init, distortion_coeff)
+
+
+
+    K = np.array(refined_intrinsic, np.float32).reshape(3,3)
+    D = np.array([distortion_coeff[0], distortion_coeff[1], 0, 0] , np.float32)
+
+    print(K, D)
+    
 
 
 # TODO: arrange this below visualization code into a single function
