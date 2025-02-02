@@ -710,11 +710,11 @@ if __name__ == "__main__":
             print(f"Warning: Image {i} is None, skipping...")
             continue
 
-        # #intrinsic 점검  --> 이상 없음.
-        height, width = img[0].shape[:2]
-        _, K_cv, D_cv, _, _ = cv2.calibrateCamera(objpoints, imgpoints, (width, height), None, None)
-        print("OpenCV Intrinsic Matrix:\n", D_cv)
-        print("Computed Intrinsic Matrix:\n", D)
+        # # #intrinsic 점검  --> 왜곡계수에 이상
+        # height, width = img[0].shape[:2]
+        # _, K_cv, D_cv, _, _ = cv2.calibrateCamera(objpoints, imgpoints, (width, height), None, None)
+        # print("OpenCV Intrinsic Matrix:\n", D_cv)
+        # print("Computed Intrinsic Matrix:\n", D)
 
 
         # 이미지 왜곡 제거
