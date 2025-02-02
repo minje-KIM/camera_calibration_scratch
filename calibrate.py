@@ -441,8 +441,8 @@ if __name__ == "__main__":
     parser.add_argument('--result_dir', default='./result', help='direction for result') 
 
     # chessboard settings
-    parser.add_argument('--corners_x', default=7, help='input chessboard points in x direction') 
-    parser.add_argument('--corners_y', default=7, help='input chessboard points in y direction') 
+    parser.add_argument('--corners_x', default=8, help='input chessboard points in x direction') 
+    parser.add_argument('--corners_y', default=6, help='input chessboard points in y direction') 
     parser.add_argument('--chess_data_dir', default='./data/chess_data', help='direction for chessboard data') 
 
     # arucoboard settings
