@@ -13,6 +13,35 @@ def calibrate():
     pass
     
 
+def reprojection_error_homography(H, objpoints, imgpoints):
+    """
+    Compute reprojection error for Homography estimation.
+    
+    Args:
+        H (np.array): Homography matrix (3x3)
+        objpoints (np.array): 3D world points in homogenous coordinates (N, 3)
+        imgpoints (np.array): Corresponding 2D image points (N, 2)
+    
+    Returns:
+        float: Mean reprojection error
+    """
+    # Convert objpoints to homogeneous coordinates (N, 3) -> (N, 3, 1)
+    objpoints_homo = np.hstack((objpoints[:, :2], np.ones((objpoints.shape[0], 1))))  # (N, 3)
+    
+    # Project using Homography
+    projected = (H @ objpoints_homo.T).T  # (N, 3)
+    
+    # Normalize homogeneous coordinates
+    projected[:, 0] /= projected[:, 2]
+    projected[:, 1] /= projected[:, 2]
+    projected_2d = projected[:, :2]  # Extract (x, y)
+    
+    # Compute Euclidean distance error
+    errors = np.linalg.norm(imgpoints - projected_2d, axis=1)
+    mean_error = np.mean(errors)
+    
+    return mean_error, projected_2d
+
 
 def solve_extrinsic(intrinsic, homographies):
     extrinsics = []
@@ -182,7 +211,7 @@ def detectchessboard(num_corner_x, num_corner_y, square_size, dir_chess, dir_res
                 # it is visually appropriate for the image size
                 
                 # Add objpoint (3D coordinate) above the corner
-                obj_text = f"{int(objp[i, 0])}, {int(objp[i, 1])}, {int(objp[i, 2])}"
+                obj_text = f"{(objp[i, 0])}, {(objp[i, 1])}, {(objp[i, 2])}"
                 cv2.putText(img, obj_text, (center[0] - 120, center[1] - 40), cv2.FONT_ITALIC, 1, (0, 255, 0), 3)
 
                 # Add imgpoint (2D coordinate) below the corner
@@ -211,7 +240,7 @@ def detectarucoboard(dir_aruco, aruco_dict, dir_result, markerLength, markerSepa
     objpoints = []  # 3D points in real world space
     imgpoints = []  # 2D points in image plane
 
-    images = glob.glob(f'{dir_aruco}/*.JPG')
+    images = glob.glob(f'{dir_aruco}/*.png')
 
     for idx, fname in enumerate(images):
         img = cv2.imread(fname)
@@ -258,16 +287,16 @@ def detectarucoboard(dir_aruco, aruco_dict, dir_result, markerLength, markerSepa
                     1,
                     cv2.LINE_AA,
                 )
-                cv2.putText(
-                    img,
-                    f"({point2D[0]}, {point2D[1]})",
-                    (point2D[0], point2D[1] + 11),
-                    cv2.FONT_ITALIC,
-                    0.5,
-                    (255, 0, 255),
-                    1,
-                    cv2.LINE_AA,
-                )
+                # cv2.putText(
+                #     img,
+                #     f"({point2D[0]}, {point2D[1]})",
+                #     (point2D[0], point2D[1] + 11),
+                #     cv2.FONT_ITALIC,
+                #     0.5,
+                #     (255, 0, 255),
+                #     1,
+                #     cv2.LINE_AA,
+                # )
                 
             output_path = f"{dir_result}/arucoboard_corner/corner_aruco_{idx}.jpg"
             cv2.imwrite(output_path, img)
@@ -451,20 +480,23 @@ def lossFunc(x0, imgpoints, objpoints, num_images):
     Compute the loss for optimization.
     """
     K = np.array(x0[:9]).reshape(3, 3)
-    distortion_coeff = np.array(x0[9:11]).reshape(2, 1)
-    extrinsic_params = np.array(x0[11:]).reshape(num_images, 3, 4)
-    
+    distortion_coeff = np.array(x0[9:14]).reshape(1, 5)
+    extrinsic_params = np.array(x0[14:]).reshape(num_images, 3, 4)
+        
     error = []
     
     for i in range(num_images):
         R = extrinsic_params[i][:, :3]  # Rotation matrix (3x3)
         t = extrinsic_params[i][:, 3]  # Translation vector (3x1)
 
-        projected_points = project_points(K, R, t, objpoints[i])  # 3D -> 2D projection
-        imgpoints_i = np.squeeze(imgpoints[i], axis=1)
+        objpoints_i = np.array(objpoints[i], dtype=np.float32)  # 3D points
+        imgpoints_i = np.squeeze(imgpoints[i])  # 2D points
+        
+        projected_points, _ = cv2.projectPoints(objpoints_i, R, t, K, distortion_coeff)
+        projected_points = projected_points.reshape(-1, 2)
 
         # L2 norm 오류 계산
-        error.append(np.linalg.norm(imgpoints_i - projected_points, axis=1))
+        error.append(np.sqrt(np.mean(np.sum((imgpoints_i - projected_points) ** 2, axis=1))))
 
     return np.hstack(error)  # 모든 오류 값을 1D array로 반환
     
@@ -499,20 +531,23 @@ def project_points(K, R, t, objpoints):
 def compute_reprojection_error(K, extrinsics, objpoints, imgpoints, distortion_coeff):
     error_mat = []
 
+    distortion_coeff = np.array(distortion_coeff, dtype=np.float32).reshape(1, -1)
+
     for i in range(len(extrinsics)):
         R = extrinsics[i][:, :3]
         t = extrinsics[i][:, 3]
 
-        #n번째 사진을 고르는 것.(-> 49개 점 중 몇번째 점을 고를지 정해야함)
-        objpoints_i = objpoints[i]   # X, X, 0
-        imgpoints_i = np.squeeze(imgpoints[i], axis=1)   # X, X
+        objpoints_i = np.array(objpoints[i], dtype=np.float32)  # 3D points
+        imgpoints_i = np.squeeze(imgpoints[i])  # 2D points
 
-        projected_points = project_points(K, R, t, objpoints_i)  # X, X, 1
+        projected_points, _ = cv2.projectPoints(objpoints_i, R, t, K, distortion_coeff)
 
-        error = np.linalg.norm(imgpoints_i - projected_points, axis=1)
-        error_mat.append(np.mean(error))
+        projected_points = projected_points.reshape(-1, 2)
 
-    error_average = np.sum(error_mat)
+        error = np.sqrt(np.mean(np.sum((imgpoints_i - projected_points) ** 2, axis=1)))
+        error_mat.append(error)
+
+    error_average = np.mean(error_mat)
 
     return error_average, projected_points
 
@@ -549,21 +584,21 @@ if __name__ == "__main__":
     parser.add_argument('--mode', default="single", help='choose camera type: single or stereo')
     parser.add_argument('--board_type', default="chessboard", help='select board type: chessboard, arucoboard, charucoboard') 
     parser.add_argument('--result_dir', default='./result', help='direction for result') 
-    parser.add_argument('--reproj_result_dir', default='./result/reproj', help='direction for calib_result') 
+    parser.add_argument('--reproj_result_dir', default='./result/reproj', help='direction for reprojection_result') 
 
     # chessboard settings
-    parser.add_argument('--chess_square_size', default=25, help='square size for chessboard in mm') 
+    parser.add_argument('--chess_square_size', default=2.5, help='square size for chessboard in cm') 
     parser.add_argument('--corners_x', default=7, help='input chessboard points in x direction') 
     parser.add_argument('--corners_y', default=7, help='input chessboard points in y direction') 
     parser.add_argument('--chess_data_dir', default='./data/chess_data', help='direction for chessboard data') 
 
     # arucoboard settings
-    parser.add_argument('--aruco_data_dir', default='./data/aruco_data', help='direction for arucoboard data') 
-    parser.add_argument('--marker_len', default=3.75, help='marker length in cm') 
-    parser.add_argument('--marker_sep_len', default=0.5, help='marker seperation length in cm') 
-    parser.add_argument('--squares_vertical', default=4, help='number of squares in vertical') 
+    parser.add_argument('--aruco_data_dir', default='./data/Cam_001', help='direction for arucoboard data') 
+    parser.add_argument('--marker_len', default=7.3, help='marker length in cm') 
+    parser.add_argument('--marker_sep_len', default=9.8, help='marker seperation length in cm') 
+    parser.add_argument('--squares_vertical', default=5, help='number of squares in vertical') 
     parser.add_argument('--squares_horizontal', default=5, help='number of squares in horizontal') 
-    aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_6X6_1000)
+    aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_6X6_100)
 
     # charucoboard settings
     parser.add_argument('--charuco_data_dir', default='./data/charuco_data', help='direction for charucoboard data') 
@@ -580,14 +615,14 @@ if __name__ == "__main__":
             - Get the 2D-3D corner point correspondences matches
             - Compatible with any board type: chessboard, arucoboard, charucoboard
 
-        Args: 
+        Args:
             - Board setting parameters
             - Image data directory
             
-        Returns: 
-            - 2D points (list of shape: (N_images))
+        Returns:
+            - imgpoints: 2D points (list of shape: (N_images))
                 - Each element in the list is a numpy array of shape: (num_points, 1, 2)
-            - 3D points (list of shape: (N_images))
+            - objpoints: 3D points (list of shape: (N_images))
                 - Each element in the list is a numpy array of shape: (num_points, 3)
     """
     if args.board_type == "chessboard":
@@ -597,25 +632,36 @@ if __name__ == "__main__":
         objpoints, imgpoints = detectarucoboard(args.aruco_data_dir, aruco_dict, args.result_dir, args.marker_len, 
                                                 args.marker_sep_len, args.squares_vertical, args.squares_horizontal)
         folder_name = args.aruco_data_dir
-        
     elif args.board_type == "charucoboard":
         objpoints, imgpoints = detectcharucoboard(args.charuco_data_dir, charuco_dict, args.result_dir, args.charuco_square_len, 
                                                 args.charuco_marker_len, args.charuco_squares_vertical, args.charuco_squares_horizontal)
         folder_name = args.charuco_data_dir
-        
     else:
         print("You set the wrong board type!")
-
 
     # 2. Homography estimation (world-image relationship)
 
     homographies_init = []
 
-    for i in range(len(imgpoints)): # Find out the homography matrix of each iamge
-        homographies_init.append(solve_homography(objpoints[i], imgpoints[i]))
-    # print(len(homographies))              #  number of board data
-    # print((homographies[0]).shape)        #  (3,3)
+    imgpoints_new = imgpoints.copy()
 
+    for i in range(len(imgpoints)):  
+
+        imgpoints_new[i] = np.squeeze(imgpoints_new[i])
+        # H, mask = cv2.findHomography(objpoints[i][:, :2], imgpoints_new[i], cv2.RANSAC, 5.0) 
+        H_manual = solve_homography(objpoints[i], imgpoints[i])
+
+        objpoints_2d = np.array(objpoints[i])[:, :2]
+        num_points = objpoints_2d.shape[0]
+
+        objpoints_homo = np.hstack((objpoints_2d, np.ones((num_points, 1))))  # (N,3)
+        projected_points_homo = (H_manual @ objpoints_homo.T).T  # (N,3)
+        reprojected_points = projected_points_homo[:, :2] / projected_points_homo[:, 2, np.newaxis]  # (N,2)
+        error = np.linalg.norm(reprojected_points - imgpoints_new[i], axis=1).mean()
+        
+        print(f"Homography reprojection error for {i}th image: {error:.2f} pixels")
+
+        homographies_init.append(H_manual)
 
     # 3. Closed form solution (Intrinsic, Extrinsic and Distortion coeffs)
     
@@ -624,7 +670,8 @@ if __name__ == "__main__":
     
     # print("intrinsic", intrinsic)     # (3, 3)
     # print("extrinsic", extrinsic)     # (3, 4)
-    distortion_coeff_init = np.array([-0.3,0.1]).reshape(2,1) # 0으로 두면 안됨.
+    
+    distortion_coeff_init = np.array([[-0.3, 0.1, 0.1, 0.1, 0.1]], dtype=np.float32)  # (1,2) 형태 유지
     distortion_coeff = distortion_coeff_init.copy()
 
     # print("Initial K:\n", intrinsic_init)
@@ -634,21 +681,47 @@ if __name__ == "__main__":
     # 4. Non-linear optimization
     x0 = np.hstack([
         intrinsic_init.flatten(),  # 3x3 -> 9개
-        distortion_coeff_init.flatten(),  # 2개
+        distortion_coeff_init.flatten(),  # 5개
         extrinsic_init.flatten()  # (N, 3, 4) → (N * 12)
     ])
 
-    res = scipy.optimize.least_squares(fun=lossFunc, x0=x0, method="lm", args=[imgpoints, objpoints, len(extrinsic_init)], max_nfev=100000)
+    res = scipy.optimize.least_squares(fun=lossFunc, x0=x0, method="trf", args=[imgpoints, objpoints, len(extrinsic_init)], max_nfev=100000)
 
     optimized_intrinsic = np.array(res.x[:9]).reshape(3, 3)  # (3x3)
-    optimized_distortion = np.array(res.x[9:11]).reshape(2, 1)  # (2,)
-    optimized_extrinsic = np.array(res.x[11:]).reshape(len(extrinsic_init), 3, 4)  # (N, 3, 4)
+    optimized_distortion = np.array(res.x[9:14]).reshape(1, 5)  # (5,)
+    optimized_extrinsic = np.array(res.x[14:]).reshape(len(extrinsic_init), 3, 4)  # (N, 3, 4)
 
     print("\n")
-    print("intrinsics ssss", intrinsic_init.shape, optimized_intrinsic.shape)
-    print("extrincs ssss", extrinsic_init.shape, optimized_extrinsic.shape)
+    print("intrinsics ssss", intrinsic_init, "---\n", optimized_intrinsic)
+    print("extrincs ssss", extrinsic_init,"---\n", optimized_extrinsic)
 
     refined_extrinsic, points = error_from_nonlinear_opt(intrinsic_init, optimized_intrinsic, extrinsic_init, optimized_extrinsic, objpoints, imgpoints, homographies_init, distortion_coeff_init, distortion_coeff)
+
+    ret, K_cv, D_cv, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, (3916, 2936), None, None)
+
+    print("OpenCV Calculated Intrinsic Matrix:\n", K_cv)
+    print("OpenCV Calculated Distortion Coefficients:\n", D_cv)
+
+    print(rvecs, tvecs)
+
+    def compute_opencv_reprojection_error(K, D, rvecs, tvecs, objpoints, imgpoints):
+        total_error = 0
+        
+        for i in range(len(objpoints)):
+            
+            objpoints_i = np.array(objpoints[i], dtype=np.float32)  # 3D points
+            imgpoints_i = np.squeeze(imgpoints[i])  # 2D points
+
+            projected_points, _ = cv2.projectPoints(objpoints_i, rvecs[i], tvecs[i], K, D)
+
+            error = np.sqrt(np.mean(np.sum((imgpoints_i - projected_points) ** 2, axis=1)))
+            total_error += error
+        return total_error / len(objpoints)
+
+    opencv_error = compute_opencv_reprojection_error(K_cv, D_cv, rvecs, tvecs, objpoints, imgpoints)
+    print(f"OpenCV Baseline Reprojection Error: {opencv_error:.2f} pixels")
+
+
 
     K = np.array(optimized_intrinsic, np.float32).reshape(3,3)
     D = np.array([float(distortion_coeff[0]), float(distortion_coeff[1]), 0, 0] , np.float32)
@@ -658,11 +731,7 @@ if __name__ == "__main__":
 
 
 
-    # 보정된 이미지 저장 및 변환된 포인트 시각화
     for i, img in enumerate(images):
-        if img is None:
-            print(f"Warning: Image {i} is None, skipping...")
-            continue
 
         # # #intrinsic 점검  --> 왜곡계수에 이상
         # height, width = img[0].shape[:2]
@@ -670,7 +739,6 @@ if __name__ == "__main__":
         # print("OpenCV Intrinsic Matrix:\n", D_cv)
         # print("Computed Intrinsic Matrix:\n", D)
 
-        # 이미지 왜곡 제거
         undistorted_img = cv2.undistort(img, K, D)
 
         # 해당 이미지의 포인트들 가져오기 (예: points[i] 형태가 아니라면 조정 필요)
