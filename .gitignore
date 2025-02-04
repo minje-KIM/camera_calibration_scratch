@@ -2,3 +2,5 @@
 *.jpg
 *.pyc
 *.png
+*.DS_Store
+/__pychache__

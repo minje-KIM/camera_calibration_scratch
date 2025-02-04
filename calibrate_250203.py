@@ -7,11 +7,83 @@ import os
 import util as util
 from cv2 import aruco
 import scipy.optimize 
-
+import math
 def calibrate():
     
     pass
     
+
+def calc_v(h,i,j):
+    hi=h[:,i]
+    hj=h[:,j]
+
+    vij=[hi[0]*hj[0],hi[0]*hj[1]+hi[1]*hj[0],hi[1]*hj[1],hi[2]*hj[0]+hi[0]*hj[2],hi[2]*hj[1]+hi[1]*hj[2],hi[2]*hj[2]]
+    vij=np.array(vij)
+
+    return vij
+
+def find_intrinsic(H):
+    V=[]
+
+    for h in H:
+        v12=calc_v(h,0,1)
+        v11=calc_v(h,0,0)
+        v22=calc_v(h,1,1)
+
+        V.append(v12)
+        V.append((v11-v22))
+
+    V=np.array(V).reshape(-1,6)
+
+    U,s,VT=np.linalg.svd(V)
+    sorted_idx=np.argsort(s)
+    b=VT[sorted_idx[0]]
+
+    if(b[0] < 0 or b[2] < 0 or b[5] < 0):
+        b = -b
+    
+    B=np.array([b[0],b[1],b[3],b[1],b[2],b[4],b[3],b[4],b[5]]).reshape(3,3)
+
+    # L = np.linalg.cholesky(B)
+    # K = np.linalg.inv(L).transpose() * L[2,2]
+
+    cy=(B[0][1]*B[0][2]-B[0][0]*B[1][2])/(B[0][0]*B[1][1]-B[0][1]**2)
+    scale_factor=(B[2][2]-(B[0][2]**2+cy*(B[0][1]*B[0][2]-B[0][0]*B[1][2]))/B[0][0])
+    f_x=math.sqrt(scale_factor/B[0][0])
+    f_y=math.sqrt((scale_factor*B[0][0])/(B[0][0]*B[1][1]-B[0][1]**2))
+    skew=-B[0][1]*f_x**2*f_y/scale_factor
+    cx=skew*cy/f_y-B[0][2]*f_x**2/scale_factor
+
+    intrinsic=np.array([f_x,skew,cx,0,f_y,cy,0,0,1]).reshape(3,3)
+
+    return intrinsic
+
+def find_extrinsic(H,intrinsic):
+    R=[]
+    T=[]
+    extrinsic=[]
+
+    for h in H:
+        h1=h[:,0]
+        h2=h[:,1]
+        h3=h[:,2]
+
+        scale=1/np.linalg.norm(np.linalg.inv(intrinsic)@h1)
+
+        r1=scale*np.linalg.inv(intrinsic)@h1
+        r2=scale*np.linalg.inv(intrinsic)@h2
+        r3=np.cross(r1,r2)
+        t=scale*np.linalg.inv(intrinsic)@h3
+
+        R.append(np.array([r1,r2,r3]).transpose())
+        T.append([t])
+
+        extrinsic.append(np.array([r1,r2,r3,t]).transpose())
+
+    return R, T
+
+
+
 
 def reprojection_error_homography(H, objpoints, imgpoints):
     """
@@ -491,7 +563,7 @@ def lossFunc(x0, imgpoints, objpoints, num_images):
 
         objpoints_i = np.array(objpoints[i], dtype=np.float32)  # 3D points
         imgpoints_i = np.squeeze(imgpoints[i])  # 2D points
-        
+
         projected_points, _ = cv2.projectPoints(objpoints_i, R, t, K, distortion_coeff)
         projected_points = projected_points.reshape(-1, 2)
 
@@ -645,7 +717,7 @@ if __name__ == "__main__":
 
     imgpoints_new = imgpoints.copy()
 
-    for i in range(len(imgpoints)):  
+    for i in range(len(imgpoints)):
 
         imgpoints_new[i] = np.squeeze(imgpoints_new[i])
         # H, mask = cv2.findHomography(objpoints[i][:, :2], imgpoints_new[i], cv2.RANSAC, 5.0) 
@@ -666,8 +738,29 @@ if __name__ == "__main__":
     # 3. Closed form solution (Intrinsic, Extrinsic and Distortion coeffs)
     
     intrinsic_init, B_init = solve_intrinsic(homographies_init)
-    extrinsic_init = solve_extrinsic(intrinsic_init, homographies_init)     #  (10, 3 ,4)
+    intrinsic_init_mj =find_intrinsic(homographies_init)
+
+    # print(intrinsic_init)
+    # print("\n")
+    # print(intrinsic_init_mj)
     
+    rotation,translation=find_extrinsic(homographies_init,intrinsic_init)
+    # extrinsic_init = solve_extrinsic(intrinsic_init, homographies_init)
+
+    # 변환하여 extrinsic_init과 같은 (N, 3, 4) 형태로 만들기
+    extrinsic_init_mj = np.zeros((len(rotation), 3, 4))
+
+    for i in range(len(rotation)):
+        extrinsic_init_mj[i, :, :3] = rotation[i]  # 3x3 회전 행렬
+        extrinsic_init_mj[i, :, 3] = np.array(translation[i]).reshape(-1)  # 리스트 → NumPy 배열로 변환 후 (3,) 형태로 변경
+
+    
+    print("extrinsic_init_mj shape:", extrinsic_init_mj.shape)  # (N, 3, 4)
+    print(extrinsic_init_mj)  # 첫 번째 변환 행렬 출력
+
+    extrinsic_init = extrinsic_init_mj
+    
+
     # print("intrinsic", intrinsic)     # (3, 3)
     # print("extrinsic", extrinsic)     # (3, 4)
     
@@ -693,7 +786,7 @@ if __name__ == "__main__":
 
     print("\n")
     print("intrinsics ssss", intrinsic_init, "---\n", optimized_intrinsic)
-    print("extrincs ssss", extrinsic_init,"---\n", optimized_extrinsic)
+    print("extrincs ssss", extrinsic_init[1],"---\n", optimized_extrinsic[1])
 
     refined_extrinsic, points = error_from_nonlinear_opt(intrinsic_init, optimized_intrinsic, extrinsic_init, optimized_extrinsic, objpoints, imgpoints, homographies_init, distortion_coeff_init, distortion_coeff)
 
